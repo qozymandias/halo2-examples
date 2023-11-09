@@ -139,13 +139,13 @@ impl<F: Field> FieldChip<F> {
         });
 
         // why don't we need a gate here?
-        //meta.create_gate("mult_inverse", |meta| {
-        //    //let lhs = meta.query_advice(advice[0], Rotation::cur());
-        //    // let rhs = meta.query_advice(advice[1], Rotation::cur());
-        //    let out = meta.query_advice(advice[0], Rotation::next());
-        //    let s_mult_inv = meta.query_selector(s_mult_inv);
-        //    vec![s_mult_inv * (out)]
-        //});
+        // meta.create_gate("mult_inverse", |meta| {
+        //     let lhs = meta.query_advice(advice[0], Rotation::cur());
+        //     // let rhs = meta.query_advice(advice[1], Rotation::cur());
+        //     let out = meta.query_advice(advice[0], Rotation::next());
+        //     let s_mult_inv = meta.query_selector(s_mult_inv);
+        //     vec![s_mult_inv * (lhs - out) ]
+        // });
 
         FieldConfig {
             advice,
