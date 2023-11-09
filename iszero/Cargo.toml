@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 group = "*"
 halo2_proofs = "*"
+pretty_assertions = "*"
