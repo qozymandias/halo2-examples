@@ -462,7 +462,7 @@ impl<F: Field> Circuit<F> for MyCircuit<F> {
             .filter_map(Result::ok)
             .collect::<Vec<_>>();
 
-        let  row_start = 0;
+        let row_start = 0;
         for (i, av) in a_advice.iter().enumerate() {
             for (j, bv) in b_advice.iter().enumerate() {
                 let mul = field_chip.mul(
@@ -475,8 +475,13 @@ impl<F: Field> Circuit<F> for MyCircuit<F> {
 
                 let tmp = mults[i + j].clone();
 
-                let add =
-                    field_chip.add(layouter.namespace(|| "a + b "), tmp, mul, col_start, row_start)?;
+                let add = field_chip.add(
+                    layouter.namespace(|| "a + b "),
+                    tmp,
+                    mul,
+                    col_start,
+                    row_start,
+                )?;
 
                 mults[i + j] = add.clone();
             }
@@ -490,64 +495,84 @@ impl<F: Field> Circuit<F> for MyCircuit<F> {
 }
 
 fn main() {
+    // use plotters::prelude::*;
+    // let root = BitMapBackend::new("layout.png", (1024, 768)).into_drawing_area();
+    // root.fill(&WHITE).unwrap();
+    // let root = root.titled("Poly mult", ("sans-serif", 20)).unwrap();
+
     use halo2_proofs::dev::MockProver;
     use halo2_proofs::pasta::Fp;
-    let k = 5;
+    let k = 10;
 
-    {
-        // test zero
-        let a = vec![Value::known(Fp::from(1)), Value::known(Fp::from(2))];
-        let b = vec![Value::known(Fp::from(3)), Value::known(Fp::from(4))];
+    let inputs = vec![
+        (
+            vec![Value::known(Fp::from(1)), Value::known(Fp::from(2))],
+            vec![Value::known(Fp::from(3)), Value::known(Fp::from(4))],
+            vec![Fp::from(3), Fp::from(10), Fp::from(8)],
+        ),
+        (
+            vec![Value::known(Fp::from(1)), Value::known(Fp::from(0))],
+            vec![Value::known(Fp::from(3)), Value::known(Fp::from(0))],
+            vec![Fp::from(3)],
+        ),
+        (
+            vec![
+                Value::known(Fp::from(1)),
+                Value::known(Fp::from(2)),
+                Value::known(Fp::from(3)),
+            ],
+            vec![
+                Value::known(Fp::from(4)),
+                Value::known(Fp::from(5)),
+                Value::known(Fp::from(0)),
+            ],
+            vec![Fp::from(4), Fp::from(13), Fp::from(22), Fp::from(15)],
+        ),
+        (
+            vec![
+                Value::known(Fp::from(1)),
+                Value::known(Fp::from(2)),
+                Value::known(Fp::from(3)),
+                Value::known(Fp::from(4)),
+                Value::known(Fp::from(5)),
+            ],
+            vec![
+                Value::known(Fp::from(6)),
+                Value::known(Fp::from(7)),
+                Value::known(Fp::from(8)),
+                Value::known(Fp::from(9)),
+                Value::known(Fp::from(10)),
+            ],
+            vec![
+                Fp::from(6),
+                Fp::from(19),
+                Fp::from(40),
+                Fp::from(70),
+                Fp::from(110),
+                Fp::from(114),
+                Fp::from(106),
+                Fp::from(85),
+                Fp::from(50),
+                Fp::from(0),
+            ],
+        ),
+    ];
 
+    for (a, b, mut public_inputs) in inputs {
         let circuit = MyCircuit { a: a, b: b };
 
-        let mut public_inputs = vec![
-            Fp::from(3), Fp::from(10), Fp::from(8), Fp::from(0)
-        ];
-
-        // Create the area you want to draw on.
-        // Use SVGBackend if you want to render to .svg instead.
-        use plotters::prelude::*;
-        let root = BitMapBackend::new("layout.png", (1024, 768)).into_drawing_area();
-        root.fill(&WHITE).unwrap();
-        let root = root.titled("Poly mult", ("sans-serif", 20)).unwrap();
-
-        halo2_proofs::dev::CircuitLayout::default().show_equality_constraints(true)
-            .render(k, &circuit, &root)
-            .unwrap();
-
-        // Generate the DOT graph string.
-        // let dot_string = halo2_proofs::dev::circuit_dot_graph(&circuit);
-
-        // // Now you can either handle it in Rust, or just
-        // // print it out to use with command-line tools.
-        // print!("{}", dot_string);
+        // halo2_proofs::dev::CircuitLayout::default()
+        //     .show_equality_constraints(true)
+        //     .render(k, &circuit, &root)
+        //     .unwrap();
 
         let prover = MockProver::run(k, &circuit, vec![public_inputs.clone()]).unwrap();
         prover.assert_satisfied();
-        // assert_eq!(prover.assert_satisfied() , Ok(()));
 
         public_inputs[0] += Fp::one();
         let prover = MockProver::run(k, &circuit, vec![public_inputs]).unwrap();
         assert!(prover.verify().is_err());
     }
-
-    // {
-    //     // test non zero
-    //     let a = Fp::from(10);
-    //     let c = Fp::from(0);
-
-    //     let circuit = MyCircuit { a: Value::known(a) };
-
-    //     let mut public_inputs = vec![c];
-
-    //     let prover = MockProver::run(k, &circuit, vec![public_inputs.clone()]).unwrap();
-    //     assert_eq!(prover.verify(), Ok(()));
-
-    //     public_inputs[0] += Fp::one();
-    //     let prover = MockProver::run(k, &circuit, vec![public_inputs]).unwrap();
-    //     assert!(prover.verify().is_err());
-    // }
 
     println!("Passed assertions!");
 }
