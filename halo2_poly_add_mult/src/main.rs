@@ -18,7 +18,7 @@ use halo2_proofs::plonk::Fixed;
 use halo2_proofs::plonk::Instance;
 use halo2_proofs::plonk::Selector;
 use halo2_proofs::poly::Rotation;
-use pretty_assertions::assert_eq;
+// use pretty_assertions::assert_eq;
 
 trait NumericInstructions<F: Field>: Chip<F> {
     type Num;
@@ -432,14 +432,6 @@ impl<F: Field> Circuit<F> for MyCircuit<F> {
         let field_chip = FieldChip::<F>::construct(config);
         let col_start = 0;
 
-        //    | a0  | a1  | a2                |
-        //    |-----|-----|-------------------|
-        //    | p_0 | q_0 |  prev += p_0 * q0 |
-        //    | p_1 | q_1 |  prev += p_1 * q1 |
-        //    |     |     |                   |
-        //    |     |     |                   |
-        //    where prev is a2[idx[p_i] + idx[pj]]
-
         let a_advice = self
             .a
             .iter()
@@ -460,8 +452,9 @@ impl<F: Field> Circuit<F> for MyCircuit<F> {
             .collect::<Vec<_>>();
         let mut mults = (0..a_advice.len() + b_advice.len())
             .map(|row| {
-                field_chip.load_zero_into_advice(
+                field_chip.load_constant(
                     layouter.namespace(|| "load zero into advice"),
+                    F::ZERO,
                     col_start,
                     row,
                 )
@@ -469,6 +462,7 @@ impl<F: Field> Circuit<F> for MyCircuit<F> {
             .filter_map(Result::ok)
             .collect::<Vec<_>>();
 
+        let  row_start = 0;
         for (i, av) in a_advice.iter().enumerate() {
             for (j, bv) in b_advice.iter().enumerate() {
                 let mul = field_chip.mul(
@@ -476,13 +470,13 @@ impl<F: Field> Circuit<F> for MyCircuit<F> {
                     av.clone(),
                     bv.clone(),
                     col_start,
-                    j,
+                    row_start,
                 )?;
 
                 let tmp = mults[i + j].clone();
 
                 let add =
-                    field_chip.add(layouter.namespace(|| "a + b "), tmp, mul, col_start, j)?;
+                    field_chip.add(layouter.namespace(|| "a + b "), tmp, mul, col_start, row_start)?;
 
                 mults[i + j] = add.clone();
             }
@@ -502,13 +496,13 @@ fn main() {
 
     {
         // test zero
-        let a = vec![Value::known(Fp::from(9)), Value::known(Fp::from(0))];
-        let b = vec![Value::known(Fp::from(3)), Value::known(Fp::from(0))];
+        let a = vec![Value::known(Fp::from(1)), Value::known(Fp::from(2))];
+        let b = vec![Value::known(Fp::from(3)), Value::known(Fp::from(4))];
 
         let circuit = MyCircuit { a: a, b: b };
 
         let mut public_inputs = vec![
-            Fp::from(27), // , Fp::from(10), Fp::from(8)
+            Fp::from(3), Fp::from(10), Fp::from(8), Fp::from(0)
         ];
 
         // Create the area you want to draw on.
@@ -518,19 +512,20 @@ fn main() {
         root.fill(&WHITE).unwrap();
         let root = root.titled("Poly mult", ("sans-serif", 20)).unwrap();
 
-        halo2_proofs::dev::CircuitLayout::default()
+        halo2_proofs::dev::CircuitLayout::default().show_equality_constraints(true)
             .render(k, &circuit, &root)
             .unwrap();
 
         // Generate the DOT graph string.
-        let dot_string = halo2_proofs::dev::circuit_dot_graph(&circuit);
+        // let dot_string = halo2_proofs::dev::circuit_dot_graph(&circuit);
 
-        // Now you can either handle it in Rust, or just
-        // print it out to use with command-line tools.
-        print!("{}", dot_string);
+        // // Now you can either handle it in Rust, or just
+        // // print it out to use with command-line tools.
+        // print!("{}", dot_string);
 
         let prover = MockProver::run(k, &circuit, vec![public_inputs.clone()]).unwrap();
-        assert_eq!(prover.verify(), Ok(()));
+        prover.assert_satisfied();
+        // assert_eq!(prover.assert_satisfied() , Ok(()));
 
         public_inputs[0] += Fp::one();
         let prover = MockProver::run(k, &circuit, vec![public_inputs]).unwrap();
