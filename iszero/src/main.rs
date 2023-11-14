@@ -1,53 +1,60 @@
-// is_zero(a : Num) -> Num { if a == 0 return 1 else return 0}
-// f { 1 if x=0; 0 otherwise }
+// Required to prove:
+//      is_zero(a : Num) -> Num { if a == 0 return 1 else return 0 }
 //
-// eq reasoning:
-//  given x we need to allow multiplicitive inverse (division where div by zero equals zero)
-//  inv(x)*x = 0 when zero
-//  inv(x)*x = 1 otherwise
-//  therefore constraint is
-//      1 - (x * inv(x)) = 0
+// Reasoning:
+//      given x we need to allow multiplicitive inverse (division where div by zero equals zero)
+//      let inv_x = multiplicitive inverse of x
+//      x * inv_x = 0 when zero
+//      x * inv_x = 1 otherwise
 //
-//  =>
+//      => let iszero(x, inv_x) = 1 - (in * inv)
 //
-// iszero(in, inv) = 1 - (in * inv)
-// problem: (inv = 0) always satisfy that constraint
-// => iszero(in, 0) = 1 - (in * 0)
-//    always evaluates to 1
-//    a malicious prover might be able to fake inv
-// so extra constaint:
-//      in * iszero(in, inv) == 1 when in = 0
-//                           == 0 when in != 0
+//      so constraint is: f(x, inv_x, out) = 1 - (x * inv_x) - out == 0
+//      where out = iszero(x, inv_x)
 //
-// => constraint: f(in, inv) = in * (1 - (in * inv)) == 0, which holds when in=0
+//      must constraint it to equal zero: f(x, inv_x, out) = 0
 //
-// e.g. f(in, 0)) =
-//          in * (1) == 0 only if in=0
+// Problem:
+//      (inv_x = 0) always satisfy that constraint
+//      => iszero(x, 0) = 1 - (x * 0)
+//         a malicious prover might be able to fake inv and set it to zero,
+//         which will always evaluates to 1 regardless of x.
 //
-// now let constraint out = f(in, inv)
-// => constraint: f(in, inv, out) = in * (1 - (in * inv)) - out
-//    thus we constraint this to always equal zero
-//      i.e. f(in, inv, out) = in * (1 - (in * inv)) - out = 0
+// Solution:
+//      add an extra constaint:
+//           x * iszero(x, inv_x) == 1 when in = 0
+//                                == 0 when in != 0
 //
-// So in terms of halo2 gate
+//      => constraint: f(x, inv_x) = x * (1 - (x * inv_x)) == 0, which holds when x=0
 //
-//        meta.create_gate("iszero", |meta| {
-//            let in = meta.query_advice(advice[0], Rotation::cur());
-//            let inv = meta.query_advice(advice[1], Rotation::cur());
-//            let out = meta.query_advice(advice[0], Rotation::next());
-//            let sel = meta.query_selector(s_iszero);
-//            vec![sel * (( in * (1 - in * inv) ) - out)]
-//        });
+//      e.g. f(x, 0)) = x * (1) == 0 only if x=0
 //
+//      now let out = f(x, inv_x)
+//      => now we must constraint the following to always equal zero:
+//              f(x, inv_x, out) = x * (1 - (x * inv_x)) - out == 0
 //
-// now
-// safe_iszero(in) = iszero(in) + f(in, iszero(in)) == 0
-// e.g. with fakes
-//      safe_iszero(10) = 1 + f(10, 1) => 1 +
+//      represented as a halo2 gate:
+//      meta.create_gate("iszero", |meta| {
+//          // ...
 //
-//  This is because the Field is a Division Ring.
+//          vec![sel * (( in * (1 - in * inv) ) - out)]
+//      });
 //
-//  alternative approach would be to define a mini plonk circuit and configure it for this case.
+//      Which must always evaluate to zero for a valid inv_x.
+//      We can illustrate this with the following truth table, and we can see it breaks
+//      the constraint when we have a malicious inv_x:
+//
+//      | x | inv_x | 1 - x * inv_x | x * (1 - x * inv_x) | Satisfies constraint |
+//      |---|-------|---------------|---------------------|----------------------|
+//      | a | 1/a   | 0             | 0                   | yes                  |
+//      | a | 0     | 1             | a                   | no                   |
+//      | 0 | 0     | 1             | 0                   | yes                  |
+//      | 0 | ?     | 1             | 0                   | yes                  |
+//
+//      The iszero_constraint now becomes a part of the original circuit via adding the result of it
+//      to the result of the iszero circuit. Which will be the same as adding zero to the iszero result,
+//      when the inv is valid, and thus if the inverse value is invalid it will break the circuit
+//      and not match our public_input.
 
 use std::marker::PhantomData;
 
@@ -192,15 +199,6 @@ impl<F: Field> FieldChip<F> {
             let sel = meta.query_selector(s_iszero_constraint);
             vec![sel * (input.clone() * (one - input.clone() * inv) - out)]
         });
-
-        // why don't we need a gate here?
-        //meta.create_gate("mult_inverse", |meta| {
-        //    let lhs = meta.query_advice(advice[0], Rotation::cur());
-        //    // let rhs = meta.query_advice(advice[1], Rotation::cur());
-        //    let out = meta.query_advice(advice[0], Rotation::next());
-        //    let s_mult_inv = meta.query_selector(s_mult_inv);
-        //    vec![s_mult_inv * (lhs - out) ]
-        //});
 
         FieldConfig {
             advice,
@@ -367,14 +365,6 @@ impl<F: Field> NumericInstructions<F> for FieldChip<F> {
             |mut region: Region<'_, F>| {
                 config.s_mult_inv.enable(&mut region, 0)?;
 
-                // let iszero_output = meta.query_advice(advice[0], Rotation::cur());
-                // let iszero_input = meta.query_advice(advice[1], Rotation::cur());
-                // let inv = meta.query_advice(advice[2], Rotation::cur());
-                // let one = meta.query_advice(advice[3], Rotation::cur());
-                // let out = meta.query_advice(advice[0], Rotation::next());
-                // let s_safe_mult_inv = meta.query_selector(s_safe_mult_inv);
-                // vec![(s_safe_mult_inv * ((iszero_input * iszero_output - (one - inv)) - out))]
-
                 a.0.copy_advice(|| "lhs", &mut region, config.advice[0], 0)?;
 
                 let value =
@@ -413,12 +403,9 @@ impl<F: Field> NumericInstructions<F> for FieldChip<F> {
                 one.0
                     .copy_advice(|| "one", &mut region, config.advice[2], 0)?;
 
-                // vec![sel * ( input * (one - input * inv) - out)]
-
                 let value = input.0.value().copied()
                     * (one.0.value().copied()
                         - (input.0.value().copied() * inv.0.value().copied()));
-
                 region
                     .assign_advice(
                         || "input * (one - input * inv)",
@@ -514,12 +501,12 @@ fn main() {
     use halo2_proofs::dev::MockProver;
     use halo2_proofs::pasta::Fp;
     let k = 5;
-        use plotters::prelude::*;
-        let root = BitMapBackend::new("layout.png", (1024, 768)).into_drawing_area();
-        root.fill(&WHITE).unwrap();
-        let root = root
-            .titled("Example Circuit Layout", ("sans-serif", 60))
-            .unwrap();
+    use plotters::prelude::*;
+    let root = BitMapBackend::new("layout.png", (1024, 768)).into_drawing_area();
+    root.fill(&WHITE).unwrap();
+    let root = root
+        .titled("Example Circuit Layout", ("sans-serif", 60))
+        .unwrap();
 
     {
         // test zero
