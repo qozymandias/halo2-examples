@@ -8,6 +8,43 @@
 //  therefore constraint is
 //      1 - (x * inv(x)) = 0
 //
+//  =>
+//
+// iszero(in, inv) = 1 - (in * inv)
+// problem: (inv = 0) always satisfy that constraint
+// => iszero(in, 0) = 1 - (in * 0)
+//    always evaluates to 1
+//    a malicious prover might be able to fake inv
+// so extra constaint:
+//      in * iszero(in, inv) == 1 when in = 0
+//                           == 0 when in != 0
+//
+// => constraint: f(in, inv) = in * (1 - (in * inv)) == 0, which holds when in=0
+//
+// e.g. f(in, 0)) =
+//          in * (1) == 0 only if in=0
+//
+// now let constraint out = f(in, inv)
+// => constraint: f(in, inv, out) = in * (1 - (in * inv)) - out
+//    thus we constraint this to always equal zero
+//      i.e. f(in, inv, out) = in * (1 - (in * inv)) - out = 0
+//
+// So in terms of halo2 gate
+//
+//        meta.create_gate("iszero", |meta| {
+//            let in = meta.query_advice(advice[0], Rotation::cur());
+//            let inv = meta.query_advice(advice[1], Rotation::cur());
+//            let out = meta.query_advice(advice[0], Rotation::next());
+//            let sel = meta.query_selector(s_iszero);
+//            vec![sel * (( in * (1 - in * inv) ) - out)]
+//        });
+//
+//
+// now
+// safe_iszero(in) = iszero(in) + f(in, iszero(in)) == 0
+// e.g. with fakes
+//      safe_iszero(10) = 1 + f(10, 1) => 1 +
+//
 //  This is because the Field is a Division Ring.
 //
 //  alternative approach would be to define a mini plonk circuit and configure it for this case.
@@ -30,7 +67,6 @@ use halo2_proofs::plonk::Fixed;
 use halo2_proofs::plonk::Instance;
 use halo2_proofs::plonk::Selector;
 use halo2_proofs::poly::Rotation;
-use pretty_assertions::assert_eq;
 
 trait NumericInstructions<F: Field>: Chip<F> {
     type Num;
@@ -64,6 +100,14 @@ trait NumericInstructions<F: Field>: Chip<F> {
 
     fn mult_inverse(&self, layouter: impl Layouter<F>, a: Self::Num) -> Result<Self::Num, Error>;
 
+    fn iszero_constraint(
+        &self,
+        layouter: impl Layouter<F>,
+        input: Self::Num,
+        inv: Self::Num,
+        one: Self::Num,
+    ) -> Result<Self::Num, Error>;
+
     fn expose_public(
         &self,
         layouter: impl Layouter<F>,
@@ -79,13 +123,14 @@ struct FieldChip<F: Field> {
 
 #[derive(Clone, Debug)]
 struct FieldConfig {
-    advice: [Column<Advice>; 2],
+    advice: [Column<Advice>; 3],
     one: Column<Fixed>,
     instance: Column<Instance>,
     s_mul: Selector,
     s_add: Selector,
     s_sub: Selector,
     s_mult_inv: Selector,
+    s_iszero_constraint: Selector,
 }
 
 impl<F: Field> FieldChip<F> {
@@ -98,7 +143,7 @@ impl<F: Field> FieldChip<F> {
 
     fn configure(
         meta: &mut ConstraintSystem<F>,
-        advice: [Column<Advice>; 2],
+        advice: [Column<Advice>; 3],
         instance: Column<Instance>,
         constant: Column<Fixed>,
         one: Column<Fixed>,
@@ -113,6 +158,7 @@ impl<F: Field> FieldChip<F> {
         let s_add = meta.selector();
         let s_sub = meta.selector();
         let s_mult_inv = meta.selector();
+        let s_iszero_constraint = meta.selector();
 
         meta.create_gate("mul", |meta| {
             let lhs = meta.query_advice(advice[0], Rotation::cur());
@@ -138,14 +184,23 @@ impl<F: Field> FieldChip<F> {
             vec![s_sub * ((lhs - rhs) - out)]
         });
 
+        meta.create_gate("iszero_constraint", |meta| {
+            let input = meta.query_advice(advice[0], Rotation::cur());
+            let inv = meta.query_advice(advice[1], Rotation::cur());
+            let one = meta.query_advice(advice[2], Rotation::cur());
+            let out = meta.query_advice(advice[0], Rotation::next());
+            let sel = meta.query_selector(s_iszero_constraint);
+            vec![sel * (input.clone() * (one - input.clone() * inv) - out)]
+        });
+
         // why don't we need a gate here?
-        // meta.create_gate("mult_inverse", |meta| {
-        //     let lhs = meta.query_advice(advice[0], Rotation::cur());
-        //     // let rhs = meta.query_advice(advice[1], Rotation::cur());
-        //     let out = meta.query_advice(advice[0], Rotation::next());
-        //     let s_mult_inv = meta.query_selector(s_mult_inv);
-        //     vec![s_mult_inv * (lhs - out) ]
-        // });
+        //meta.create_gate("mult_inverse", |meta| {
+        //    let lhs = meta.query_advice(advice[0], Rotation::cur());
+        //    // let rhs = meta.query_advice(advice[1], Rotation::cur());
+        //    let out = meta.query_advice(advice[0], Rotation::next());
+        //    let s_mult_inv = meta.query_selector(s_mult_inv);
+        //    vec![s_mult_inv * (lhs - out) ]
+        //});
 
         FieldConfig {
             advice,
@@ -155,6 +210,7 @@ impl<F: Field> FieldChip<F> {
             s_add,
             s_sub,
             s_mult_inv,
+            s_iszero_constraint,
         }
     }
 }
@@ -311,6 +367,14 @@ impl<F: Field> NumericInstructions<F> for FieldChip<F> {
             |mut region: Region<'_, F>| {
                 config.s_mult_inv.enable(&mut region, 0)?;
 
+                // let iszero_output = meta.query_advice(advice[0], Rotation::cur());
+                // let iszero_input = meta.query_advice(advice[1], Rotation::cur());
+                // let inv = meta.query_advice(advice[2], Rotation::cur());
+                // let one = meta.query_advice(advice[3], Rotation::cur());
+                // let out = meta.query_advice(advice[0], Rotation::next());
+                // let s_safe_mult_inv = meta.query_selector(s_safe_mult_inv);
+                // vec![(s_safe_mult_inv * ((iszero_input * iszero_output - (one - inv)) - out))]
+
                 a.0.copy_advice(|| "lhs", &mut region, config.advice[0], 0)?;
 
                 let value =
@@ -319,6 +383,49 @@ impl<F: Field> NumericInstructions<F> for FieldChip<F> {
                         .map(|value| value.invert().unwrap_or(F::ZERO));
                 region
                     .assign_advice(|| "1/lhs", config.advice[0], 1, || value)
+                    .map(Number)
+            },
+        )
+    }
+    // let input = meta.query_advice(advice[0], Rotation::cur());
+    // let inv = meta.query_advice(advice[1], Rotation::cur());
+    // let one = meta.query_advice(advice[2], Rotation::cur());
+
+    fn iszero_constraint(
+        &self,
+        mut layouter: impl Layouter<F>,
+        input: Self::Num,
+        inv: Self::Num,
+        one: Self::Num,
+    ) -> Result<Self::Num, Error> {
+        let config = self.config();
+
+        layouter.assign_region(
+            || "check_mult_inv",
+            |mut region: Region<'_, F>| {
+                config.s_iszero_constraint.enable(&mut region, 0)?;
+
+                input
+                    .0
+                    .copy_advice(|| "input", &mut region, config.advice[0], 0)?;
+                inv.0
+                    .copy_advice(|| "inv", &mut region, config.advice[1], 0)?;
+                one.0
+                    .copy_advice(|| "one", &mut region, config.advice[2], 0)?;
+
+                // vec![sel * ( input * (one - input * inv) - out)]
+
+                let value = input.0.value().copied()
+                    * (one.0.value().copied()
+                        - (input.0.value().copied() * inv.0.value().copied()));
+
+                region
+                    .assign_advice(
+                        || "input * (one - input * inv)",
+                        config.advice[0],
+                        1,
+                        || value,
+                    )
                     .map(Number)
             },
         )
@@ -352,7 +459,11 @@ impl<F: Field> Circuit<F> for MyCircuit<F> {
     }
 
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-        let advice = [meta.advice_column(), meta.advice_column()];
+        let advice = [
+            meta.advice_column(),
+            meta.advice_column(),
+            meta.advice_column(),
+        ];
         let instance = meta.instance_column();
         let constant = meta.fixed_column();
         let one = meta.fixed_column();
@@ -377,8 +488,24 @@ impl<F: Field> Circuit<F> for MyCircuit<F> {
             mul_inv.clone(),
         )?;
 
-        let out = field_chip.sub(layouter.namespace(|| "1 - (a*1/a) "), one, mult)?;
+        let iszero = field_chip.sub(
+            layouter.namespace(|| "1 - (a*1/a) "),
+            one.clone(),
+            mult.clone(),
+        )?;
 
+        let iszero_constraint = field_chip.iszero_constraint(
+            layouter.namespace(|| " a ( 1 - (a*a_inv) ) "),
+            a.clone(),
+            mul_inv.clone(),
+            one.clone(),
+        )?;
+
+        let out = field_chip.add(
+            layouter.namespace(|| " iszero  + iszero_constraint "),
+            iszero.clone(),
+            iszero_constraint.clone(),
+        )?;
         field_chip.expose_public(layouter.namespace(|| "expose c"), out, 0)
     }
 }
@@ -386,7 +513,13 @@ impl<F: Field> Circuit<F> for MyCircuit<F> {
 fn main() {
     use halo2_proofs::dev::MockProver;
     use halo2_proofs::pasta::Fp;
-    let k = 4;
+    let k = 5;
+        use plotters::prelude::*;
+        let root = BitMapBackend::new("layout.png", (1024, 768)).into_drawing_area();
+        root.fill(&WHITE).unwrap();
+        let root = root
+            .titled("Example Circuit Layout", ("sans-serif", 60))
+            .unwrap();
 
     {
         // test zero
@@ -397,21 +530,8 @@ fn main() {
 
         let mut public_inputs = vec![c];
 
-        // Create the area you want to draw on.
-        // Use SVGBackend if you want to render to .svg instead.
-        use plotters::prelude::*;
-        let root = BitMapBackend::new("layout.png", (1024, 768)).into_drawing_area();
-        root.fill(&WHITE).unwrap();
-        let root = root
-            .titled("Example Circuit Layout", ("sans-serif", 60))
-            .unwrap();
-
-        halo2_proofs::dev::CircuitLayout::default()
-            .render(k, &circuit, &root)
-            .unwrap();
-
         let prover = MockProver::run(k, &circuit, vec![public_inputs.clone()]).unwrap();
-        assert_eq!(prover.verify(), Ok(()));
+        prover.assert_satisfied();
 
         public_inputs[0] += Fp::one();
         let prover = MockProver::run(k, &circuit, vec![public_inputs]).unwrap();
@@ -427,8 +547,12 @@ fn main() {
 
         let mut public_inputs = vec![c];
 
+        halo2_proofs::dev::CircuitLayout::default()
+            .render(k, &circuit, &root)
+            .unwrap();
+
         let prover = MockProver::run(k, &circuit, vec![public_inputs.clone()]).unwrap();
-        assert_eq!(prover.verify(), Ok(()));
+        prover.assert_satisfied();
 
         public_inputs[0] += Fp::one();
         let prover = MockProver::run(k, &circuit, vec![public_inputs]).unwrap();
