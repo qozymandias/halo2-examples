@@ -37,7 +37,7 @@
 //      meta.create_gate("iszero", |meta| {
 //          // ...
 //
-//          vec![sel * (( in * (1 - in * inv) ) - out)]
+//          vec![sel * (( x * (1 - x * inv_x) ) - out)]
 //      });
 //
 //      Which must always evaluate to zero for a valid inv_x.
