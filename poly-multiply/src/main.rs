@@ -29,14 +29,17 @@ where
 fn main() {
 
     {
-        use pasta_curves::pallas;
         use poly::Poly;
+        use poly::Coeff;
+        use poly::Evaluation;
 
         let inputs = vec![Fp::from(1), Fp::from(2)];
 
-        let p: Poly<Fp, pallas::Base> = Poly::new(inputs);
+        let p: Poly<Fp, Coeff> = Poly::coeff_from_vec(inputs.clone());
 
-        println!("{}", p.pretty_print());
+        let _p: Poly<Fp, Evaluation> = Poly::eval_from_vec(inputs.clone());
+        
+        println!("{:?}", p.pretty_print());
     }
 
     let a_size = 2;

@@ -11,25 +11,34 @@ use std::{
 };
 
 // pub trait Basis: Copy + Debug + Send + Sync {}
+#[derive(Clone, Debug)]
+pub struct Coeff;
+#[derive(Clone, Debug)]
+pub struct Evaluation;
 
 #[derive(Debug, Clone)]
-pub struct Poly<F: Field, B: Debug + Clone> {
+pub struct Poly<F: Field, B> {
     vals: Vec<F>,
     _repr: PhantomData<B>,
 }
 
 impl<F: Field, B: Debug + Clone> Poly<F, B> {
-    pub fn new(vals_in: Vec<F>) -> Poly<F, B> {
-        Poly {
-            vals: vals_in,
-            _repr: PhantomData,
-        }
-    }
-
     pub fn pretty_print(&self) -> String {
         // let out = "todo".to_string();
         format!("{:?}", self.vals)
         // out
+    }
+}
+
+impl<F: Field> Poly<F, Coeff> {
+    pub fn coeff_from_vec(vals_in: Vec<F>) -> Poly<F, Coeff> {
+        Poly { vals: vals_in, _repr: PhantomData }
+    }
+}
+
+impl<F: Field> Poly<F, Evaluation> {
+    pub fn eval_from_vec(vals_in: Vec<F>) -> Poly<F, Evaluation> {
+        Poly { vals: vals_in, _repr: PhantomData }
     }
 }
 
@@ -44,14 +53,15 @@ impl<F: Field, B: Debug + Clone> Poly<F, B> {
 #[cfg(test)]
 mod tests {
     use super::Poly;
+    use super::Coeff;
     use halo2_proofs::pasta::Fp;
-    use pasta_curves::pallas;
+    // use pasta_curves::pallas;
 
     #[test]
     fn test_new() {
         let inputs = vec![Fp::from(1), Fp::from(2)];
 
-        let p: Poly<Fp, pallas::Base> = Poly::new(inputs);
+        let p: Poly<Fp, Coeff> = Poly::coeff_from_vec(inputs);
 
         assert_eq!(p.vals.len(), 2);
     }
