@@ -1,10 +1,65 @@
 use halo2_proofs::arithmetic::Field;
 use halo2_proofs::poly::Basis;
 // use halo2_proofs::poly::Coeff;
-use halo2_proofs::poly::Polynomial;
-use halo2_proofs::poly::EvaluationDomain;
 use halo2_proofs::pasta::Fp;
+use halo2_proofs::poly::EvaluationDomain;
+use halo2_proofs::poly::Polynomial;
 
+mod poly;
+
+fn simple_poly_product<F, B, Pn>(
+    a: &Polynomial<F, B>,
+    b: &Polynomial<F, B>,
+    mk_empty_fn: &Pn,
+) -> Polynomial<F, B>
+where
+    F: Field,
+    B: Basis,
+    Pn: Fn() -> Polynomial<F, B>,
+{
+    let mut ret = mk_empty_fn();
+    for (i, &a_coeff) in a.iter().enumerate() {
+        for (j, &b_coeff) in b.iter().enumerate() {
+            ret[i + j] += a_coeff * b_coeff;
+        }
+    }
+    ret
+}
+
+fn main() {
+
+    {
+        use pasta_curves::pallas;
+        use poly::Poly;
+
+        let inputs = vec![Fp::from(1), Fp::from(2)];
+
+        let p: Poly<Fp, pallas::Base> = Poly::new(inputs);
+
+        println!("{}", p.pretty_print());
+    }
+
+    let a_size = 2;
+    let b_size = 2;
+
+    assert_eq!(a_size, b_size);
+    let j = a_size;
+    let k = 1;
+
+    // size is 2^k
+    let domain = EvaluationDomain::<Fp>::new(j, k);
+    let output_domain = EvaluationDomain::<Fp>::new(j, k * 2);
+
+    let a = domain.coeff_from_vec(vec![Fp::from(1), Fp::from(2)]);
+    let b = domain.coeff_from_vec(vec![Fp::from(3), Fp::from(4)]);
+    let expected_c =
+        output_domain.coeff_from_vec(vec![Fp::from(3), Fp::from(10), Fp::from(8), Fp::from(0)]);
+    let out = simple_poly_product(&a, &b, &|| output_domain.empty_coeff());
+    for (i, &v) in out.iter().enumerate() {
+        assert_eq!(expected_c[i], v);
+        // println!("{:?}x^{:?}", v, i);
+    }
+}
 
 // fn multiply_polynomials<F>(
 //     poly_a: Polynomial<F, LagrangeCoeff>,
@@ -73,43 +128,3 @@ use halo2_proofs::pasta::Fp;
 //
 //     }
 // }
-
-
-
-
-fn simple_poly_product<F, B, Pn>(a: &Polynomial<F, B>, b: &Polynomial<F, B>, mk_empty_fn : &Pn) -> Polynomial<F, B>
-where
-    F: Field,
-    B: Basis,
-    Pn : Fn() -> Polynomial<F,B>
-{
-    let mut ret = mk_empty_fn();
-    for (i, &a_coeff) in a.iter().enumerate() {
-        for (j, &b_coeff) in b.iter().enumerate() {
-            ret[i + j] += a_coeff * b_coeff;
-        }
-    }
-    ret
-}
-
-fn main() {
-    let a_size = 2;
-    let b_size = 2;
-    
-    assert_eq!(a_size, b_size);
-    let j = a_size;
-    let k = 1;
-
-    // size is 2^k
-    let domain = EvaluationDomain::<Fp>::new(j , k);
-    let output_domain = EvaluationDomain::<Fp>::new(j , k*2);
-
-    let a = domain.coeff_from_vec(vec![Fp::from(1), Fp::from(2)]);
-    let b = domain.coeff_from_vec(vec![Fp::from(3), Fp::from(4)]);
-    let expected_c = output_domain.coeff_from_vec( vec![Fp::from(3), Fp::from(10), Fp::from(8), Fp::from(0)]);
-    let out = simple_poly_product(&a, &b, &|  | {  output_domain.empty_coeff() });
-    for (i, &v) in out.iter().enumerate() {
-        assert_eq!(expected_c[i], v);
-        println!("{:?}x^{:?}", v, i);
-    }
-}
