@@ -14,7 +14,7 @@
         {
             "type": "shell",
             "label": "build & test",
-            "command": "time cargo test"
+            "command": "time cargo test -- --nocapture"
         }
     ]
 }

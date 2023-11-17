@@ -26,20 +26,48 @@ where
     ret
 }
 
-fn main() {
+fn basic_slow_poly_product<F>(a: &Vec<F>, b: &Vec<F>) -> Vec<F>
+where
+    F: Field,
+{
+    let mut ret = Vec::new();
+    for _ in 0..(a.len() + b.len()) {
+        ret.push(F::ZERO);
+    }
+    for (i, &a_coeff) in a.iter().enumerate() {
+        for (j, &b_coeff) in b.iter().enumerate() {
+            ret[i + j] += a_coeff * b_coeff;
+        }
+    }
+    ret
+}
 
+fn main() {
     {
-        use poly::Poly;
         use poly::Coeff;
         use poly::Evaluation;
+        use poly::Poly;
 
-        let inputs = vec![Fp::from(1), Fp::from(2)];
+        let inputs = (
+            vec![Fp::from(1), Fp::from(2)],
+            vec![Fp::from(3), Fp::from(4)],
+        );
 
-        let p: Poly<Fp, Coeff> = Poly::coeff_from_vec(inputs.clone());
+        let p: Poly<Fp, Coeff> = Poly::coeff_from_vec(inputs.0.clone());
+        let q: Poly<Fp, Coeff> = Poly::coeff_from_vec(inputs.1.clone());
 
-        let _p: Poly<Fp, Evaluation> = Poly::eval_from_vec(inputs.clone());
-        
-        println!("{:?}", p.pretty_print());
+        let r = p * q;
+        r.pretty_print();
+
+        let expected_r = basic_slow_poly_product(&inputs.0, &inputs.1);
+
+        for (i, &v) in expected_r.iter().enumerate() {
+            assert_eq!(v, r[i]);
+        }
+
+        // println!("{:?}", p.pretty_print());
+
+        let _p: Poly<Fp, Evaluation> = Poly::eval_from_vec(inputs.0.clone());
     }
 
     let a_size = 2;
